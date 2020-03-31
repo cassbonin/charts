@@ -1,181 +1,186 @@
-apiVersion: apps/v1beta2
+apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ template "redash.fullname" . }}-server
+  name: {{ include "redash.fullname" . }}
   labels:
-    app: {{ template "redash.name" . }}
-    chart: {{ template "redash.chart" . }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "redash.name" . }}
+    app.kubernetes.io/component: server
+    helm.sh/chart: {{ include "redash.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.server.replicaCount }}
   selector:
     matchLabels:
-      app: {{ template "redash.name" . }}
-      role: server
-      release: {{ .Release.Name }}
+      app.kubernetes.io/name: {{ include "redash.name" . }}
+      app.kubernetes.io/component: server
+      app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: {{ template "redash.name" . }}
-        role: server
-        release: {{ .Release.Name }}
+        app.kubernetes.io/name: {{ include "redash.name" . }}
+        app.kubernetes.io/component: server
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      restartPolicy: Always
-{{- if .Values.dbCreateTables }}
       initContainers:
-        - name: {{ .Chart.Name }}-create-db
+        - name: {{ include "redash.name" . }}-server-createdb
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -c
-            - /app/bin/docker-entrypoint create_db;
+          command: ["bash", "/config/createdb.sh"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
           env:
-          {{- range $key, $value := .Values.extraEnvironment }}
-          - name: {{ $key | upper }}
-            value: {{ tpl $value $ | quote }}
+            - name: REDASH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redash.fullname" . }}
+                  key: secretKey
+            - name: REDASH_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redash.fullname" . }}
+                  key: cookieSecret 
+            - name: REDASH_DATABASE_URL
+            {{- if not .Values.postgresql.enabled }}
+              value: {{ default "" .Values.externalPostgreSQL | quote }}
+            {{- end }}
+            - name: REDASH_DATABASE_USER
+              value: "{{ .Values.postgresql.postgresqlUsername }}"
+            - name: REDASH_DATABASE_PASSWORD
+            {{- if .Values.postgresql.enabled }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgresql
+                  key: postgresql-password
+            {{- end }}
+            - name: REDASH_DATABASE_HOSTNAME
+              value: {{ include "redash.postgresql.fullname" . }}
+            - name: REDASH_DATABASE_PORT
+              value: "{{ .Values.postgresql.service.port }}"
+            - name: REDASH_DATABASE_DB
+              value: "{{ .Values.postgresql.postgresqlDatabase }}"
+            - name: REDASH_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                {{- if .Values.redis.existingSecret }}
+                  name: {{ .Values.redis.existingSecret }}
+                {{- else }}
+                  name: {{ .Release.Name }}-redis
+                {{- end }}
+                  key: redis-password
+            - name: REDASH_REDIS_HOSTNAME
+              value: {{ include "redash.redis.fullname" . }}
+            - name: REDASH_REDIS_PORT
+              value: "{{ .Values.redis.master.port }}"
+            - name: REDASH_REDIS_DB
+              value: "{{ .Values.redis.databaseNumber }}"
+          {{- range $key, $value := .Values.env }}
+            - name: "{{ $key }}"
+              value: "{{ $value }}"
           {{- end }}
-          - name: REDASH_NAME
-            value: {{ .Values.redashName | quote }}
-          - name: REDASH_LOG_LEVEL
-            value: {{ .Values.logLevel | quote }}
-          - name: REDASH_DATABASE_URL
-            value: {{ template "redash.postgresConnectionURL" . }}
-          - name: REDASH_HOST
-            value: {{ template "redash.host" . }}
-          - name: REDASH_REDIS_URL
-            value: {{ template "redash.redisURL" . }}
-          - name: REDASH_MAIL_SERVER
-            value: {{ .Values.mail.server | quote }}
-          - name: REDASH_MAIL_PORT
-            value: {{ .Values.mail.port | quote }}
-          - name: REDASH_MAIL_USERNAME
-            value: {{ .Values.mail.username | quote }}
-          - name: REDASH_MAIL_PASSWORD
-            value: {{ .Values.mail.password | quote }}
-          - name: REDASH_MAIL_DEFAULT_SENDER
-            value: {{ .Values.mail.defaultSender | quote }}
-          - name: REDASH_STATIC_ASSETS_PATH
-            value: {{ .Values.redashStaticAssetsPath | quote }}
-          - name: REDASH_COOKIE_SECRET
-            value: {{ .Values.redashCookieSecret | quote }}
-          - name: REDASH_CORS_ACCESS_CONTROL_ALLOW_ORIGIN
-            value: {{ template "redash.host" . }}
-          - name: REDASH_ENFORCE_HTTPS
-            value: {{ .Values.redashEnforceHTTPs | quote }}
-          - name: REDASH_WEB_WORKERS
-            value: {{ .Values.web.workersCount | quote }}
-          - name: REDASH_JOB_EXPIRY_TIME
-            value: {{ .Values.redashJobExpiryTime | quote }}
-          - name: REDASH_FEATURE_SHOW_PERMISSIONS_CONTROL
-            value: {{ .Values.redashFeatureShowPermissionsControl | quote }}
-          - name: REDASH_ADHOC_QUERY_TIME_LIMIT
-            value: {{ .Values.redashAdhocQueryTimeLimit | quote }}
-          {{- if .Values.googleOAuth.enabled }}
-          - name: REDASH_GOOGLE_CLIENT_ID
-            value: {{ .Values.googleOAuth.redashGoogleClientId | quote }}
-          - name: REDASH_GOOGLE_CLIENT_SECRET
-            value: {{ .Values.googleOAuth.redashGoogleClientSecret | quote }}
-          - name: REDASH_PASSWORD_LOGIN_ENABLED
-            value: {{ .Values.googleOAuth.redashPasswordLoginEnabled | quote }}
+          {{- range $key, $value := .Values.server.env }}
+            - name: "{{ $key }}"
+              value: "{{ $value }}"
           {{- end }}
-{{- end }}
       containers:
-        - name: {{ .Chart.Name }}-server
+        - name: {{ include "redash.name" . }}-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - /bin/sh
-            - -c
-            - /app/bin/docker-entrypoint server; tail -f /dev/null
+          command: ["/bin/sh"]
+          args: ["-c", ". /config/dynamicenv.sh && /app/bin/docker-entrypoint server"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+          env:
+            - name: REDASH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redash.fullname" . }}
+                  key: secretKey     
+            - name: REDASH_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redash.fullname" . }}
+                  key: cookieSecret
+     
+            - name: REDASH_DATABASE_URL
+            {{- if not .Values.postgresql.enabled }}
+              value: {{ default "" .Values.externalPostgreSQL | quote }}
+            {{- end }}
+            - name: REDASH_DATABASE_USER
+              value: "{{ .Values.postgresql.postgresqlUsername }}"
+            - name: REDASH_DATABASE_PASSWORD
+            {{- if .Values.postgresql.enabled }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-postgresql
+                  key: postgresql-password
+            {{- end }}
+            - name: REDASH_DATABASE_HOSTNAME
+              value: {{ include "redash.postgresql.fullname" . }}
+            - name: REDASH_DATABASE_PORT
+              value: "{{ .Values.postgresql.service.port }}"
+            - name: REDASH_DATABASE_DB
+              value: "{{ .Values.postgresql.postgresqlDatabase }}"
+            - name: REDASH_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                {{- if .Values.redis.existingSecret }}
+                  name: {{ .Values.redis.existingSecret }}
+                {{- else }}
+                  name: {{ .Release.Name }}-redis
+                {{- end }}
+                  key: redis-password
+            - name: REDASH_REDIS_HOSTNAME
+              value: {{ include "redash.redis.fullname" . }}
+            - name: REDASH_REDIS_PORT
+              value: "{{ .Values.redis.master.port }}"
+            - name: REDASH_REDIS_DB
+              value: "{{ .Values.redis.databaseNumber }}"
+          {{- range $key, $value := .Values.env }}
+            - name: "{{ $key }}"
+              value: "{{ $value }}"
+          {{- end }}
+          {{- range $key, $value := .Values.server.env }}
+            - name: "{{ $key }}"
+              value: "{{ $value }}"
+          {{- end }}
           ports:
-            - name: http
-              containerPort: 5000
-              port: 5000
-              protocol: TCP
-          readinessProbe:
-            exec:
-             command:
-             - pgrep
-             - -f
-             - gunicorn
-            initialDelaySeconds: 30
-            timeoutSeconds: 5
-            periodSeconds: 10
-            successThreshold: 1
-            failureThreshold: 3
+            - containerPort: {{ .Values.server.httpPort }}
           livenessProbe:
             exec:
-             command:
-             - pgrep
-             - -f
-             - gunicorn
-            initialDelaySeconds: 30
+              command: ["/bin/sh", "-c", ". /config/dynamicenv.sh && /app/manage.py status"]
+            # Redash can take a while to come up initially, so we delay checks.
+            initialDelaySeconds: 90
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /static/images/redash_icon_small.png
+              port: {{ .Values.server.httpPort }}
+            initialDelaySeconds: 10
             timeoutSeconds: 1
             periodSeconds: 10
             successThreshold: 1
             failureThreshold: 3
-          env:
-        {{- range $key, $value := .Values.extraEnvironment }}
-          - name: {{ $key | upper }}
-            value: {{ tpl $value $ | quote }}
-        {{- end }}
-          - name: REDASH_NAME
-            value: {{ .Values.redashName | quote }}
-          - name: REDASH_LOG_LEVEL
-            value: {{ .Values.logLevel | quote }}
-          - name: REDASH_DATABASE_URL
-            value: {{ template "redash.postgresConnectionURL" . }}
-          - name: REDASH_HOST
-            value: {{ template "redash.host" . }}
-          - name: REDASH_REDIS_URL
-            value: {{ template "redash.redisURL" . }}
-          - name: REDASH_MAIL_SERVER
-            value: {{ .Values.mail.server | quote }}
-          - name: REDASH_MAIL_PORT
-            value: {{ .Values.mail.port | quote }}
-          - name: REDASH_MAIL_USERNAME
-            value: {{ .Values.mail.username | quote }}
-          - name: REDASH_MAIL_PASSWORD
-            value: {{ .Values.mail.password | quote }}
-          - name: REDASH_MAIL_DEFAULT_SENDER
-            value: {{ .Values.mail.defaultSender | quote }}
-          - name: REDASH_STATIC_ASSETS_PATH
-            value: {{ .Values.redashStaticAssetsPath | quote }}
-          - name: REDASH_COOKIE_SECRET
-            value: {{ .Values.redashCookieSecret | quote }}
-          - name: REDASH_CORS_ACCESS_CONTROL_ALLOW_ORIGIN
-            value: {{ template "redash.host" . }}
-          - name: REDASH_ENFORCE_HTTPS
-            value: {{ .Values.redashEnforceHTTPs | quote }}
-          - name: REDASH_WEB_WORKERS
-            value: {{ .Values.web.workersCount | quote }}
-          - name: REDASH_JOB_EXPIRY_TIME
-            value: {{ .Values.redashJobExpiryTime | quote }}
-          - name: REDASH_FEATURE_SHOW_PERMISSIONS_CONTROL
-            value: {{ .Values.redashFeatureShowPermissionsControl | quote }}
-          - name: REDASH_ADHOC_QUERY_TIME_LIMIT
-            value: {{ .Values.redashAdhocQueryTimeLimit | quote }}
-          {{- if .Values.googleOAuth.enabled }}
-          - name: REDASH_GOOGLE_CLIENT_ID
-            value: {{ .Values.googleOAuth.redashGoogleClientId | quote }}
-          - name: REDASH_GOOGLE_CLIENT_SECRET
-            value: {{ .Values.googleOAuth.redashGoogleClientSecret | quote }}
-          - name: REDASH_PASSWORD_LOGIN_ENABLED
-            value: {{ .Values.googleOAuth.redashPasswordLoginEnabled | quote }}
-          {{- end }}
           resources:
-{{ toYaml .Values.web.resources | indent 12 }}
-    {{- with .Values.nodeSelector }}
+{{ toYaml .Values.server.resources | indent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "redash.fullname" . }}
+    {{- with .Values.server.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}
     {{- end }}
-    {{- with .Values.affinity }}
+    {{- with .Values.server.affinity }}
       affinity:
 {{ toYaml . | indent 8 }}
     {{- end }}
-    {{- with .Values.tolerations }}
+    {{- with .Values.server.tolerations }}
       tolerations:
 {{ toYaml . | indent 8 }}
     {{- end }}

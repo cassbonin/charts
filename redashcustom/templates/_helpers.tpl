@@ -31,44 +31,62 @@ Create chart name and version as used by the chart label.
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+
 {{/*
-redash host
+Create a default fully qualified adhocWorker name.
 */}}
-{{- define "redash.host" -}}
-{{- range $host := .Values.ingress.hosts -}}
-  {{- printf "https://%s" $host | quote -}}
-{{- end -}}
+{{- define "redash.adhocWorker.fullname" -}}
+{{- template "redash.fullname" . -}}-adhocworker
 {{- end -}}
 
 {{/*
-redash redis
+Create a default fully qualified scheduledworker name.
 */}}
-{{- define "redash.redisURL" -}}
-{{- if .Values.externalRedis.enabled -}}
-{{- $redisport := .Values.externalRedis.RedisPort | toString -}}
-{{- printf "redis://%s@%s:%s/0" .Values.externalRedis.RedisPassword .Values.externalRedis.RedisHost $redisport | quote -}}
-{{- else -}}
-{{- $redisport := .Values.redis.RedisPort | toString -}}
-{{- printf "redis://%s@%s-redis-master:%s/0" .Values.redis.RedisPassword .Values.redis.RedisHost $redisport | quote -}}
-{{- end -}}
+{{- define "redash.scheduledWorker.fullname" -}}
+{{- template "redash.fullname" . -}}-scheduledworker
 {{- end -}}
 
 {{/*
-redash postgres
+Create a default fully qualified scheduler name.
 */}}
-{{- define "redash.postgresConnectionURL" -}}
-{{- if .Values.externalPostgres.enabled -}}
-{{- $psqlport := .Values.externalPostgres.postgresqlPort | toString -}}
-{{- printf "postgresql://%s:%s@%s:%s/%s" .Values.externalPostgres.postgresqlUsername .Values.externalPostgres.postgresqlPassword .Values.externalPostgres.postgresqlHost $psqlport .Values.externalPostgres.postgresqlDatabase | quote -}}
-{{- else -}}
-{{- if .Values.nameOverride -}}
-{{- $hostnameoverride := printf "%s-postgresql" .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
-{{- $host := (include "redash.fullname" .) -}}
-{{- printf "postgresql://%s:%s@%s-postgresql:5432/%s" .Values.postgresql.postgresqlUsername .Values.postgresql.postgresqlPassword $host .Values.postgresql.postgresqlDatabase | quote -}}
-{{- else -}}
-{{- $hostnamedefault := printf "%s-postgresql" .Chart.Name | trunc 63 | trimSuffix "-" -}}
-{{- $host := $hostnamedefault | trunc 63 | trimSuffix "-" -}}
-{{- printf "postgresql://%s:%s@%s:5432/%s" .Values.postgresql.postgresqlUsername .Values.postgresql.postgresqlPassword $host .Values.postgresql.postgresqlDatabase | quote -}}
+{{- define "redash.scheduler.fullname" -}}
+{{- template "redash.fullname" . -}}-scheduler
 {{- end -}}
+
+{{/*
+Create a default fully qualified postgresql name.
+*/}}
+{{- define "redash.postgresql.fullname" -}}
+{{- printf "%s-%s" .Release.Name "postgresql" | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Create a default fully qualified redis name.
+*/}}
+{{- define "redash.redis.fullname" -}}
+{{- printf "%s-%s" .Release.Name "redis-master" | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
+Common labels
+*/}}
+{{- define "redash.labels" -}}
+app.kubernetes.io/name: {{ include "redash.name" . }}
+helm.sh/chart: {{ include "redash.chart" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "redash.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+    {{ default (include "redash.fullname" .) .Values.serviceAccount.name }}
+{{- else -}}
+    {{ default "default" .Values.serviceAccount.name }}
 {{- end -}}
 {{- end -}}
